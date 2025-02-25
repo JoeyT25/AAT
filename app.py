@@ -1,42 +1,31 @@
 # -*- coding: utf-8 -*-
 import pandas as pd
-import subprocess
-import sys
+import openpyxl
 import streamlit as st
+import requests
 import matplotlib.pyplot as plt
+from fpdf import FPDF
 from sklearn.ensemble import RandomForestRegressor
 from xgboost import XGBRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error
 
-# Ensure required packages are installed at runtime
-required_packages = ["openpyxl", "matplotlib", "sklearn", "xgboost", "streamlit"]
-
-for package in required_packages:
-    try:
-        __import__(package)
-    except ModuleNotFoundError:
-        subprocess.run([sys.executable, "-m", "pip", "install", package], check=True)
-
-import openpyxl
-
-# Streamlit App Title
+# Streamlit Web App Title
 st.title("AI-Powered Appraisal Adjustment Tool")
-
-st.write("Upload an MLS CSV file to analyze property adjustments.")
 
 # Upload MLS Data File
 uploaded_file = st.file_uploader("Upload MLS Data (CSV or Excel)", type=["csv", "xlsx"])
 
 if uploaded_file:
+    # Load Data
     file_extension = uploaded_file.name.split(".")[-1]
-    
     if file_extension == "csv":
         df = pd.read_csv(uploaded_file, encoding="utf-8")
     else:
         df = pd.read_excel(uploaded_file)
-    
+
+    # Display Uploaded Data
     st.write("Uploaded MLS Data:")
     st.dataframe(df.head())
 
@@ -76,6 +65,18 @@ if uploaded_file:
     final_mae = mean_absolute_error(y_test, final_pred)
     st.write(f"Model Accuracy (MAE): ${final_mae:,.2f}")
 
+    # Integrate Real-Time Market Data from Zillow API
+    st.write("### Real-Time Market Data")
+    api_url = "https://api.zillow.com/property-data"
+    params = {"zipcode": "83814", "property_type": "single_family"}
+    headers = {"Authorization": "Bearer YOUR_ZILLOW_API_KEY"}
+    response = requests.get(api_url, params=params, headers=headers)
+    if response.status_code == 200:
+        market_data = response.json()
+        st.write(market_data)
+    else:
+        st.write("Failed to fetch market data from Zillow API.")
+
     # Calculate Feature Importance
     feature_importance = dict(zip(features, rf_model.feature_importances_))
     adjustments = {
@@ -95,3 +96,21 @@ if uploaded_file:
     ax.set_xlabel("Monetary Adjustment ($)")
     ax.set_title("Feature Importance in Appraisal Adjustments")
     st.pyplot(fig)
+
+    # Save to Excel
+    excel_file_path = "appraisal_adjustments.xlsx"
+    df_adjustments.to_excel(excel_file_path, index=False, engine='openpyxl')
+    st.download_button(label="Download Adjustments Report (Excel)", data=open(excel_file_path, "rb").read(), file_name=excel_file_path, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    # Generate PDF Report
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+    pdf.cell(200, 10, txt="AI-Powered Real Estate Appraisal Report", ln=True, align="C")
+    pdf.cell(200, 10, txt=f"Model Accuracy (MAE): ${final_mae:,.2f}", ln=True, align="L")
+    pdf.cell(200, 10, txt="Calculated Adjustments:", ln=True, align="L")
+    for index, row in df_adjustments.iterrows():
+        pdf.cell(200, 10, txt=f"{row['Feature']}: ${row['Monetary Adjustment ($)']:,.2f}", ln=True, align="L")
+    pdf_file_path = "appraisal_report.pdf"
+    pdf.output(pdf_file_path)
+    st.download_button(label="Download Appraisal Report (PDF)", data=open(pdf_file_path, "rb").read(), file_name=pdf_file_path, mime="application/pdf")
